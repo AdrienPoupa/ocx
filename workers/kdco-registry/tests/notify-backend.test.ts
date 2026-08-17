@@ -232,6 +232,31 @@ describe("macOS alerter desktop notifications", () => {
 		expect(warn).not.toHaveBeenCalled()
 	})
 
+	it("does not wait for alerter interaction before reporting a successful launch", async () => {
+		let resolveExit: ((exitCode: number) => void) | undefined
+		const exited = new Promise<number>((resolve) => {
+			resolveExit = resolve
+		})
+
+		const result = await Promise.race([
+			sendMacOSAlerterNotification(
+				{
+					title: "Question for you",
+					message: "Please answer",
+				},
+				{
+					which: async () => "/usr/local/bin/alerter",
+					spawnProcess: () => ({ exited }),
+				},
+			),
+			new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 50)),
+		])
+
+		expect(result).toBe(true)
+		resolveExit?.(0)
+		await Promise.resolve()
+	})
+
 	it("warns and reports false when alerter is missing", async () => {
 		const spawnProcess = mock((_argv: string[]) => ({
 			exited: Promise.resolve(0),
@@ -255,7 +280,7 @@ describe("macOS alerter desktop notifications", () => {
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("alerter not found on PATH"))
 	})
 
-	it("warns and reports false when alerter exits non-zero", async () => {
+	it("reports a successful launch and warns asynchronously when alerter exits non-zero", async () => {
 		const warn = mock(() => {})
 
 		const sent = await sendMacOSAlerterNotification(
@@ -270,9 +295,30 @@ describe("macOS alerter desktop notifications", () => {
 			},
 		)
 
-		expect(sent).toBe(false)
+		expect(sent).toBe(true)
+		await Promise.resolve()
+		expect(warn).toHaveBeenCalledWith("notify: macOS desktop notification exited with code 2.")
+	})
+
+	it("warns asynchronously when monitoring the alerter process fails", async () => {
+		const warn = mock(() => {})
+
+		const sent = await sendMacOSAlerterNotification(
+			{
+				title: "Ready",
+				message: "Task complete",
+			},
+			{
+				which: async () => "/usr/local/bin/alerter",
+				spawnProcess: () => ({ exited: Promise.reject(new Error("wait failed")) }),
+				warn,
+			},
+		)
+
+		expect(sent).toBe(true)
+		await Promise.resolve()
 		expect(warn).toHaveBeenCalledWith(
-			"notify: macOS desktop notification skipped; alerter exited with code 2.",
+			"notify: macOS desktop notification process failed (wait failed).",
 		)
 	})
 
