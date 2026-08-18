@@ -230,7 +230,7 @@ describe("notify plugin event compatibility and dedupe", () => {
 		})
 
 		expect(notificationPayloads).toHaveLength(1)
-		expect(notificationPayloads[0]?.timeout).toBe("12")
+		expect(String(notificationPayloads[0]?.timeout)).toBe("12")
 	})
 
 	it("defaults the desktop notification timeout to zero", async () => {
@@ -245,7 +245,26 @@ describe("notify plugin event compatibility and dedupe", () => {
 		})
 
 		expect(notificationPayloads).toHaveLength(1)
-		expect(notificationPayloads[0]?.timeout).toBe("0")
+		expect(String(notificationPayloads[0]?.timeout)).toBe("0")
+	})
+
+	it("defaults invalid desktop notification timeouts to zero", async () => {
+		for (const [index, timeout] of [-1, "12"].entries()) {
+			mockedConfig = { timeout }
+			const { hooks } = await createPlugin()
+
+			await emitEvent(hooks, {
+				type: "question.asked",
+				properties: {
+					id: `question-invalid-timeout-${index}`,
+					sessionID: "session-a",
+					questions: [],
+				},
+			})
+		}
+
+		expect(notificationPayloads).toHaveLength(2)
+		expect(notificationPayloads.map((payload) => String(payload.timeout))).toEqual(["0", "0"])
 	})
 
 	it("dedupes permission notification when permission.asked and permission.updated describe same request", async () => {
