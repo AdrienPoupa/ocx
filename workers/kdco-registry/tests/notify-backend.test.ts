@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test"
 import {
 	buildAlerterArguments,
+	buildNodeNotifierOptions,
 	sendDesktopNotificationByPlatform,
 	sendMacOSAlerterNotification,
 	sendNotificationWithFallback,
@@ -172,6 +173,7 @@ describe("macOS alerter desktop notifications", () => {
 				subtitle: "Session A",
 				sound: "Submarine",
 				senderBundleId: "com.mitchellh.ghostty",
+				timeout: 12,
 			}),
 		).toEqual([
 			"alerter",
@@ -179,6 +181,8 @@ describe("macOS alerter desktop notifications", () => {
 			"Permission needed",
 			"--title",
 			"Waiting for you",
+			"--timeout",
+			"12",
 			"--subtitle",
 			"Session A",
 			"--sound",
@@ -186,6 +190,33 @@ describe("macOS alerter desktop notifications", () => {
 			"--sender",
 			"com.mitchellh.ghostty",
 		])
+	})
+
+	it("maps zero timeout to alerter and node-notifier", () => {
+		const options = {
+			title: "Ready",
+			message: "Task complete",
+			sound: "Glass",
+			timeout: 0,
+		}
+
+		expect(buildAlerterArguments(options)).toEqual([
+			"alerter",
+			"--message",
+			"Task complete",
+			"--title",
+			"Ready",
+			"--timeout",
+			"0",
+			"--sound",
+			"Glass",
+		])
+		expect(buildNodeNotifierOptions(options)).toEqual({
+			title: "Ready",
+			message: "Task complete",
+			sound: "Glass",
+			timeout: 0,
+		})
 	})
 
 	it("omits optional alerter flags when not configured", () => {

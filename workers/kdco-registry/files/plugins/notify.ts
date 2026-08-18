@@ -29,7 +29,11 @@ import detectTerminal from "detect-terminal"
 // @ts-expect-error - installed at runtime by OCX
 import notifier from "node-notifier"
 import type { OpencodeClient } from "./kdco-primitives/types"
-import { sendDesktopNotificationByPlatform, sendNotificationWithFallback } from "./notify/backend"
+import {
+	buildNodeNotifierOptions,
+	sendDesktopNotificationByPlatform,
+	sendNotificationWithFallback,
+} from "./notify/backend"
 import {
 	clearCmuxStatus,
 	resolveCmuxNotificationCommand,
@@ -47,6 +51,8 @@ import { parseOscTitleContext, writeOscTitleBestEffort } from "./notify/title"
 interface NotifyConfig {
 	/** Notify for child/sub-session events (default: false) */
 	notifyChildSessions: boolean
+	/** Seconds before a desktop notification disappears (default: 0, no timeout) */
+	timeout: number
 	/** Sound configuration per event type */
 	sounds: {
 		idle: string
@@ -72,6 +78,7 @@ interface TerminalInfo {
 
 const DEFAULT_CONFIG: NotifyConfig = {
 	notifyChildSessions: false,
+	timeout: 0,
 	sounds: {
 		idle: "Glass",
 		error: "Basso",
@@ -115,6 +122,12 @@ async function loadConfig(): Promise<NotifyConfig> {
 		return {
 			...DEFAULT_CONFIG,
 			...userConfig,
+			timeout:
+				typeof userConfig.timeout === "number" &&
+				Number.isFinite(userConfig.timeout) &&
+				userConfig.timeout >= 0
+					? userConfig.timeout
+					: DEFAULT_CONFIG.timeout,
 			sounds: {
 				...DEFAULT_CONFIG.sounds,
 				...userConfig.sounds,
@@ -246,6 +259,7 @@ interface NotificationOptions {
 interface NotificationRuntime {
 	preferCmux: boolean
 	cmuxCommand?: string
+	timeout: number
 }
 
 const QUESTION_DEDUPE_WINDOW_MS = 1500
@@ -382,24 +396,25 @@ function buildPermissionEventDedupeKey(properties: unknown): string | null {
 	return `permission:request:${normalizedRequestID}`
 }
 
-async function sendDesktopNotification(options: NotificationOptions): Promise<void> {
+async function sendDesktopNotification(
+	options: NotificationOptions,
+	timeout: number,
+): Promise<void> {
 	const { title, message, sound, terminalInfo } = options
-
-	// Base notification options
-	const notifyOptions: Record<string, unknown> = {
-		title,
-		message,
-		sound,
-	}
-
-	await sendDesktopNotificationByPlatform({
-		platform: process.platform,
+	const desktopNotificationOptions = {
 		title,
 		message,
 		subtitle: options.subtitle,
 		sound,
 		senderBundleId: terminalInfo.bundleId,
-		sendNodeNotifierNotification: () => notifier.notify(notifyOptions),
+		timeout,
+	}
+
+	await sendDesktopNotificationByPlatform({
+		platform: process.platform,
+		...desktopNotificationOptions,
+		sendNodeNotifierNotification: () =>
+			notifier.notify(buildNodeNotifierOptions(desktopNotificationOptions)),
 	})
 }
 
@@ -418,7 +433,7 @@ async function sendNotification(
 				},
 				{ cmuxCommand: runtime.cmuxCommand },
 			),
-		sendDesktopNotification: () => sendDesktopNotification(options),
+		sendDesktopNotification: () => sendDesktopNotification(options, runtime.timeout),
 	})
 }
 
@@ -564,6 +579,7 @@ const NotifyPlugin: Plugin = async (ctx) => {
 	const notificationRuntime: NotificationRuntime = {
 		preferCmux: Boolean(cmuxCommand),
 		cmuxCommand,
+		timeout: config.timeout,
 	}
 	const oscTitleContext = parseOscTitleContext()
 	const shouldSuppressCmuxSessionStatusWrites = oscTitleContext?.mayWriteOscTitle === true

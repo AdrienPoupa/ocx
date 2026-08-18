@@ -33,6 +33,7 @@ function pushAlerterNotificationPayload(command: string[]): void {
 		if (flag === "--subtitle") payload.subtitle = value
 		if (flag === "--sound") payload.sound = value
 		if (flag === "--sender") payload.sender = value
+		if (flag === "--timeout") payload.timeout = value
 	}
 
 	notificationPayloads.push(payload)
@@ -213,6 +214,40 @@ function decodeOscTitleWrite(chunk: unknown): string | null {
 }
 
 describe("notify plugin event compatibility and dedupe", () => {
+	it("applies the configured desktop notification timeout", async () => {
+		mockedConfig = {
+			timeout: 12,
+		}
+
+		const { hooks } = await createPlugin()
+		await emitEvent(hooks, {
+			type: "question.asked",
+			properties: {
+				id: "question-timeout",
+				sessionID: "session-a",
+				questions: [],
+			},
+		})
+
+		expect(notificationPayloads).toHaveLength(1)
+		expect(notificationPayloads[0]?.timeout).toBe("12")
+	})
+
+	it("defaults the desktop notification timeout to zero", async () => {
+		const { hooks } = await createPlugin()
+		await emitEvent(hooks, {
+			type: "question.asked",
+			properties: {
+				id: "question-default-timeout",
+				sessionID: "session-a",
+				questions: [],
+			},
+		})
+
+		expect(notificationPayloads).toHaveLength(1)
+		expect(notificationPayloads[0]?.timeout).toBe("0")
+	})
+
 	it("dedupes permission notification when permission.asked and permission.updated describe same request", async () => {
 		const { hooks } = await createPlugin()
 
