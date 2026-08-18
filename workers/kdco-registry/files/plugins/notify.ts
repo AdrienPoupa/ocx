@@ -117,17 +117,13 @@ async function loadConfig(): Promise<NotifyConfig> {
 	try {
 		const content = await fs.readFile(configPath, "utf8")
 		const userConfig = JSON.parse(content) as Partial<NotifyConfig>
+		const timeout = userConfig.timeout ?? DEFAULT_CONFIG.timeout
 
 		// Merge with defaults
 		return {
 			...DEFAULT_CONFIG,
 			...userConfig,
-			timeout:
-				typeof userConfig.timeout === "number" &&
-				Number.isFinite(userConfig.timeout) &&
-				userConfig.timeout >= 0
-					? userConfig.timeout
-					: DEFAULT_CONFIG.timeout,
+			timeout,
 			sounds: {
 				...DEFAULT_CONFIG.sounds,
 				...userConfig.sounds,
