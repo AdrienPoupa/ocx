@@ -51,6 +51,23 @@ describe("worktree config loading", () => {
 		expect(config.hooks.postCreate).toEqual(["local"])
 	})
 
+	it("uses the global config when the project config only has generated defaults", async () => {
+		const localConfigPath = path.join(testDir, ".opencode", "worktree.jsonc")
+		const globalConfigPath = path.join(testHome, ".config", "opencode", "worktree.jsonc")
+
+		await loadWorktreeConfig(testDir, log, testHome)
+		await writeConfig(
+			globalConfigPath,
+			'{"worktreePath":"~/global-worktrees","hooks":{"postCreate":["global"]}}',
+		)
+
+		const config = await loadWorktreeConfig(testDir, log, testHome)
+
+		expect(await Bun.file(localConfigPath).exists()).toBe(true)
+		expect(config.worktreePath).toBe(path.join(testHome, "global-worktrees"))
+		expect(config.hooks.postCreate).toEqual(["global"])
+	})
+
 	it("falls back to the global config when the project config is missing", async () => {
 		const localConfigPath = path.join(testDir, ".opencode", "worktree.jsonc")
 		const globalConfigPath = path.join(testHome, ".config", "opencode", "worktree.jsonc")

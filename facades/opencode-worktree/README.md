@@ -117,7 +117,14 @@ The plugin detects your terminal automatically:
 
 ## Configuration
 
-Auto-creates `.opencode/worktree.jsonc` on first use:
+The plugin reads `.opencode/worktree.jsonc` first. If the file contains only
+generated default values, the plugin reads `~/.config/opencode/worktree.jsonc`
+when that file exists. A project config with custom values takes precedence.
+The two files are not merged.
+
+If neither config file exists, the plugin creates `.opencode/worktree.jsonc`
+with default values. The plugin does not create a project config when the
+global config exists.
 
 ```jsonc
 {

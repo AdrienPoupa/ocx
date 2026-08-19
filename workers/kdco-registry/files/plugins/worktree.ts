@@ -907,27 +907,7 @@ function resolveHomePath(p: string, homeDirectory = os.homedir()): string {
 	return p
 }
 
-/**
- * Load worktree configuration from the project-local file first, then the
- * global file. Auto-creates the project-local file if neither exists.
- */
-async function loadWorktreeConfig(
-	directory: string,
-	log: Logger,
-	homeDirectory = os.homedir(),
-): Promise<WorktreeConfig> {
-	const localConfigPath = path.join(directory, ".opencode", "worktree.jsonc")
-	const globalConfigPath = path.join(homeDirectory, ".config", "opencode", "worktree.jsonc")
-	let configPath = localConfigPath
-
-	try {
-		if (!(await Bun.file(localConfigPath).exists())) {
-			if (await Bun.file(globalConfigPath).exists()) {
-				configPath = globalConfigPath
-				log.debug(`[worktree] Using global config: ${configPath}`)
-			} else {
-				// Auto-create config with helpful defaults and comments
-				const defaultConfig = `{
+const DEFAULT_WORKTREE_CONFIG = `{
   "$schema": "https://registry.kdco.dev/schemas/worktree.json",
 
   // Worktree plugin configuration
@@ -961,27 +941,88 @@ async function loadWorktreeConfig(
   }
 }
 `
-				// Ensure .opencode directory exists
-				await mkdir(path.join(directory, ".opencode"), { recursive: true })
-				await Bun.write(localConfigPath, defaultConfig)
-				log.info(`[worktree] Created default config: ${localConfigPath}`)
-				return worktreeConfigSchema.parse({})
-			}
-		}
 
-		const file = Bun.file(configPath)
-		const content = await file.text()
-		// Use proper JSONC parser (handles comments in strings correctly)
-		const parsed = parseJsonc(content)
-		if (parsed === undefined) {
-			log.error(`[worktree] Invalid worktree.jsonc syntax: ${configPath}`)
+function isDefaultWorktreeConfig(config: WorktreeConfig): boolean {
+	return (
+		config.worktreePath === undefined &&
+		config.sync.copyFiles.length === 0 &&
+		config.sync.symlinkDirs.length === 0 &&
+		config.sync.exclude.length === 0 &&
+		config.hooks.postCreate.length === 0 &&
+		config.hooks.preDelete.length === 0
+	)
+}
+
+function parseWorktreeConfig(
+	content: string,
+	configPath: string,
+	log: Logger,
+	homeDirectory: string,
+): WorktreeConfig | null {
+	// Use proper JSONC parser (handles comments in strings correctly)
+	const parsed = parseJsonc(content)
+	if (parsed === undefined) {
+		log.error(`[worktree] Invalid worktree.jsonc syntax: ${configPath}`)
+		return null
+	}
+
+	const config = worktreeConfigSchema.parse(parsed)
+	if (config.worktreePath) {
+		config.worktreePath = resolveHomePath(config.worktreePath, homeDirectory)
+	}
+	return config
+}
+
+/**
+ * Load worktree configuration from the project-local file first, then the
+ * global file. An untouched generated project file does not override global
+ * configuration. Auto-creates the project-local file if neither exists.
+ */
+async function loadWorktreeConfig(
+	directory: string,
+	log: Logger,
+	homeDirectory = os.homedir(),
+): Promise<WorktreeConfig> {
+	const localConfigPath = path.join(directory, ".opencode", "worktree.jsonc")
+	const globalConfigPath = path.join(homeDirectory, ".config", "opencode", "worktree.jsonc")
+	let configPath = localConfigPath
+
+	try {
+		const localFile = Bun.file(localConfigPath)
+		if (await localFile.exists()) {
+			const localConfig = parseWorktreeConfig(
+				await localFile.text(),
+				localConfigPath,
+				log,
+				homeDirectory,
+			)
+			if (!localConfig) return worktreeConfigSchema.parse({})
+			if (!isDefaultWorktreeConfig(localConfig)) return localConfig
+
+			if (await Bun.file(globalConfigPath).exists()) {
+				configPath = globalConfigPath
+				log.debug(`[worktree] Using global config: ${configPath}`)
+			} else {
+				return localConfig
+			}
+		} else if (await Bun.file(globalConfigPath).exists()) {
+			configPath = globalConfigPath
+			log.debug(`[worktree] Using global config: ${configPath}`)
+		} else {
+			// Ensure .opencode directory exists
+			await mkdir(path.join(directory, ".opencode"), { recursive: true })
+			await Bun.write(localConfigPath, DEFAULT_WORKTREE_CONFIG)
+			log.info(`[worktree] Created default config: ${localConfigPath}`)
 			return worktreeConfigSchema.parse({})
 		}
-		const config = worktreeConfigSchema.parse(parsed)
-		if (config.worktreePath) {
-			config.worktreePath = resolveHomePath(config.worktreePath, homeDirectory)
-		}
-		return config
+
+		const config = parseWorktreeConfig(
+			await Bun.file(configPath).text(),
+			configPath,
+			log,
+			homeDirectory,
+		)
+		return config ?? worktreeConfigSchema.parse({})
 	} catch (error) {
 		log.warn(`[worktree] Failed to load config ${configPath}: ${error}`)
 		return worktreeConfigSchema.parse({})
