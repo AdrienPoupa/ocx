@@ -144,6 +144,8 @@ Auto-creates `.opencode/worktree.jsonc` on first use:
 }
 ```
 
+For settings shared across projects, create `~/.config/opencode/worktree.jsonc`.
+
 ### Common Configurations
 
 **Node.js project:**

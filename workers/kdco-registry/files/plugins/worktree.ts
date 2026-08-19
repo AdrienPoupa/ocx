@@ -124,7 +124,7 @@ const branchNameSchema = z
 
 /**
  * Worktree plugin configuration schema.
- * Config file: .opencode/worktree.jsonc
+ * Config files: .opencode/worktree.jsonc, then ~/.config/opencode/worktree.jsonc
  */
 const worktreeConfigSchema = z.object({
 	/** Custom base path for worktree storage. Supports ~ for home directory. */
@@ -900,25 +900,34 @@ async function runHooks(cwd: string, commands: string[], log: Logger): Promise<v
 /**
  * Resolve a path that may contain a leading `~` to the user's home directory.
  */
-function resolveHomePath(p: string): string {
+function resolveHomePath(p: string, homeDirectory = os.homedir()): string {
 	if (p === "~" || p.startsWith("~/") || p.startsWith("~\\")) {
-		return path.join(os.homedir(), p.slice(1))
+		return path.join(homeDirectory, p.slice(1))
 	}
 	return p
 }
 
 /**
- * Load worktree-specific configuration from .opencode/worktree.jsonc
- * Auto-creates config file with helpful defaults if it doesn't exist.
+ * Load worktree configuration from the project-local file first, then the
+ * global file. Auto-creates the project-local file if neither exists.
  */
-async function loadWorktreeConfig(directory: string, log: Logger): Promise<WorktreeConfig> {
-	const configPath = path.join(directory, ".opencode", "worktree.jsonc")
+async function loadWorktreeConfig(
+	directory: string,
+	log: Logger,
+	homeDirectory = os.homedir(),
+): Promise<WorktreeConfig> {
+	const localConfigPath = path.join(directory, ".opencode", "worktree.jsonc")
+	const globalConfigPath = path.join(homeDirectory, ".config", "opencode", "worktree.jsonc")
+	let configPath = localConfigPath
 
 	try {
-		const file = Bun.file(configPath)
-		if (!(await file.exists())) {
-			// Auto-create config with helpful defaults and comments
-			const defaultConfig = `{
+		if (!(await Bun.file(localConfigPath).exists())) {
+			if (await Bun.file(globalConfigPath).exists()) {
+				configPath = globalConfigPath
+				log.debug(`[worktree] Using global config: ${configPath}`)
+			} else {
+				// Auto-create config with helpful defaults and comments
+				const defaultConfig = `{
   "$schema": "https://registry.kdco.dev/schemas/worktree.json",
 
   // Worktree plugin configuration
@@ -952,27 +961,29 @@ async function loadWorktreeConfig(directory: string, log: Logger): Promise<Workt
   }
 }
 `
-			// Ensure .opencode directory exists
-			await mkdir(path.join(directory, ".opencode"), { recursive: true })
-			await Bun.write(configPath, defaultConfig)
-			log.info(`[worktree] Created default config: ${configPath}`)
-			return worktreeConfigSchema.parse({})
+				// Ensure .opencode directory exists
+				await mkdir(path.join(directory, ".opencode"), { recursive: true })
+				await Bun.write(localConfigPath, defaultConfig)
+				log.info(`[worktree] Created default config: ${localConfigPath}`)
+				return worktreeConfigSchema.parse({})
+			}
 		}
 
+		const file = Bun.file(configPath)
 		const content = await file.text()
 		// Use proper JSONC parser (handles comments in strings correctly)
 		const parsed = parseJsonc(content)
 		if (parsed === undefined) {
-			log.error(`[worktree] Invalid worktree.jsonc syntax`)
+			log.error(`[worktree] Invalid worktree.jsonc syntax: ${configPath}`)
 			return worktreeConfigSchema.parse({})
 		}
 		const config = worktreeConfigSchema.parse(parsed)
 		if (config.worktreePath) {
-			config.worktreePath = resolveHomePath(config.worktreePath)
+			config.worktreePath = resolveHomePath(config.worktreePath, homeDirectory)
 		}
 		return config
 	} catch (error) {
-		log.warn(`[worktree] Failed to load config: ${error}`)
+		log.warn(`[worktree] Failed to load config ${configPath}: ${error}`)
 		return worktreeConfigSchema.parse({})
 	}
 }
@@ -1208,6 +1219,7 @@ const WorktreePluginWithInternals = Object.assign(WorktreePlugin, {
 		validateOcxProfileAvailability,
 		ensureLaunchContextProfile,
 		finalizeWorktreeLaunch,
+		loadWorktreeConfig,
 		symlinkDirs,
 	},
 } as const)
